@@ -19,6 +19,7 @@ from class_dependencies import (
     changed_bindings, generated_classes, literal_binding_values, only_binding_values_changed,
 )
 from import_probe import imports_safely
+from lambda_analysis import changed_lambda_bodies
 
 ROOT = Path(__file__).resolve().parent
 CLASS_IMPORT_CONTEXTS = ["", "@global", "@collect:*"]
@@ -258,6 +259,22 @@ class Selector:
         if class_names:
             bindings = changed_bindings(old_tree, new_tree, set(change.get("old_lines", [])),
                                         set(change.get("new_lines", [])))
+            # A callback body can change without rebuilding its enclosing class
+            # data. Preserve the entire lambda signature and surrounding AST.
+            deferred = changed_lambda_bodies(old_tree, new_tree)
+            if deferred and not info.get("global_read"):
+                spans = {line for node in deferred
+                         for line in range(node.lineno, node.end_lineno + 1)}
+                if not spans.intersection(info.get("global", [])):
+                    covered = {number for line in spans for number in
+                               self.numbers(info.get("lines", {}).get(str(line), []))}
+                    owners = {owner for old, new in bindings.values() for binding in [*old, *new]
+                              for owner in binding.usage_owners}
+                    users = self.class_users(path, owners)
+                    if covered and users is not None:
+                        if not self._class_import_safe(path, new_text):
+                            return self.all_numbers, "callback import failed; broad fallback"
+                        return covered | users | readers, "deferred callback and qualified class users"
             # Only replace the existing broad selection for existing bindings.
             # Adding/removing fields can affect users absent from baseline maps.
             # Generated methods can be absent from baseline receiver tracing.
