@@ -15,10 +15,13 @@ from pathlib import Path
 
 from patch_analysis import PatchError, apply_patch_to_text, parse_patch
 from scheduler import schedule
-from class_dependencies import changed_bindings
+from class_dependencies import (
+    changed_bindings, generated_classes, literal_binding_values, only_binding_values_changed,
+)
 from import_probe import imports_safely
 
 ROOT = Path(__file__).resolve().parent
+CLASS_IMPORT_CONTEXTS = ["", "@global", "@collect:*"]
 
 
 class Selector:
@@ -37,6 +40,7 @@ class Selector:
         self.import_cache: dict[str, set[int]] = {}
         self.symbols: dict = {}
         self.class_usage: dict = {}
+        self.attribute_global_usage: dict | None = None
         self.class_numbers: dict[int, int] = {}
         self._active_overrides: dict[str, str] = {}
         self._class_probe_cache: dict[tuple, bool] = {}
@@ -53,17 +57,23 @@ class Selector:
                 if nodeid in self.by_id
             }
             self.class_usage = data.get("class_usage", {})
+            if data.get("class_usage_import_contexts") == CLASS_IMPORT_CONTEXTS:
+                self.attribute_global_usage = data.get("attribute_global_usage")
             self.class_numbers = self.map_numbers
             classes_path = map_path.parent / "classes.json.gz"
             if classes_path.exists():
                 with gzip.open(classes_path, "rt", encoding="utf-8") as handle:
                     class_data = json.load(handle)
-                self.class_usage = class_data["class_usage"]
-                self.class_numbers = {
-                    index: self.by_id[nodeid]
-                    for index, nodeid in enumerate(class_data["tests"])
-                    if nodeid in self.by_id
-                }
+                if (class_data.get("commit") == data.get("commit")
+                        and class_data.get("exit_code") == 0
+                        and class_data.get("import_contexts") == CLASS_IMPORT_CONTEXTS):
+                    self.class_usage = class_data["class_usage"]
+                    self.attribute_global_usage = class_data.get("attribute_global_usage")
+                    self.class_numbers = {
+                        index: self.by_id[nodeid]
+                        for index, nodeid in enumerate(class_data["tests"])
+                        if nodeid in self.by_id
+                    }
             symbols_path = map_path.parent / "symbols.json.gz"
             if symbols_path.exists():
                 with gzip.open(symbols_path, "rt", encoding="utf-8") as handle:
@@ -149,6 +159,14 @@ class Selector:
         if key not in self._class_probe_cache:
             self._class_probe_cache[key] = imports_safely(self.source, overrides)
         return self._class_probe_cache[key]
+
+    def class_fields_uncached(self, path: str, bindings: dict) -> bool:
+        """Decline narrowing when collection can copy data outside its class."""
+        if self.attribute_global_usage is None:
+            return False
+        observed = self.attribute_global_usage.get(path, {})
+        return all(not {attribute, "__dict__"}.intersection(observed.get(owner, []))
+                   for owner, attribute in bindings)
 
     @staticmethod
     def changed_class_data(tree: ast.Module, lines: set[int]) -> set[str]:
@@ -242,8 +260,11 @@ class Selector:
                                         set(change.get("new_lines", [])))
             # Only replace the existing broad selection for existing bindings.
             # Adding/removing fields can affect users absent from baseline maps.
-            if bindings and all(old and new and len(old) == len(new)
-                                for old, new in bindings.values()):
+            # Generated methods can be absent from baseline receiver tracing.
+            if (only_binding_values_changed(old_tree, new_tree, bindings)
+                    and literal_binding_values(bindings)
+                    and not generated_classes(old_tree)
+                    and self.class_fields_uncached(path, bindings)):
                 owners = {owner for old, new in bindings.values() for binding in [*old, *new]
                           for owner in binding.usage_owners}
                 users = self.class_users(path, owners)

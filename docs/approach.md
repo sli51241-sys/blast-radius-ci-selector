@@ -55,6 +55,14 @@ text, and some comments have meaning to a parser or test helper. Comparing
 Python syntax trees provides additional evidence, but it must still account for
 source readers and behavior during imports.
 
+For a class-data edit, a separate baseline map can identify tests that used the
+specific qualified class or one of its subclasses. Narrowing requires existing
+literal values and no other syntax-tree changes. It also declines when the field
+or class dictionary was read during collection, because another class or module
+may have cached a copy. A fresh interpreter checks that the modified modules and
+derived dialects still import. Generated classes, augmented assignments, special
+Python fields, and other class edits keep the broader selection.
+
 The baseline map cannot prove that every possible new behavior has been covered.
 Import-time changes, new dependencies, and cached file reads are important
 sources of uncertainty. The 300-second miss penalty makes conservative fallbacks

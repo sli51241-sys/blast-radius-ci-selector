@@ -19,6 +19,29 @@
       "missed_commits": [],
       "local_selector_cpu_seconds": 0.578583,
       "local_selector_wall_seconds": 0.588224
+    },
+    "literal_class_data": {
+      "simulated_seconds": 316.575,
+      "missed_commits": [],
+      "validation": "make sample (Linux/AMD64 Docker)"
     }
+  },
+  "class_precision_cpu_comparison": {
+    "method": "Median of 3 Linux/AMD64 Docker runs with the Makefile restrictions; child process user+system CPU, including import probes. Local measurements, not official server CPU.",
+    "runs_seconds": {
+      "baseline": [
+        1.4850249999999998,
+        1.4693939999999999,
+        1.526773
+      ],
+      "class_precision": [
+        2.302522,
+        2.291083,
+        2.338325
+      ]
+    },
+    "baseline_median_seconds": 1.4850249999999998,
+    "class_precision_median_seconds": 2.302522,
+    "added_median_seconds": 0.8174970000000004
   }
 }

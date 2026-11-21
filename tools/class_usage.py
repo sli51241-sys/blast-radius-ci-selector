@@ -214,13 +214,18 @@ class ClassUsage:
             if len(args) >= 2:
                 self._attribute(args[0], args[1])
         elif function is self._vars and args:
-            self.receiver(args[0])
+            self._attribute(args[0], "__dict__")
         result = function(*args, **kwargs)
         if isinstance(result, type):
             self.receiver(result)
         return result
 
     def export(self, indices):
+        def import_context(context):
+            # Imports happen while collecting test modules as well as before
+            # collection. A cached result can outlive that first importer.
+            return context in ("", "@global") or context.startswith("@collect:")
+
         class_usage = {path: {name: [] for name in names} for path, names in self.inventory.items() if names}
         attribute_usage = {}
         class_global, attribute_global = {}, {}
@@ -228,20 +233,22 @@ class ClassUsage:
             users = {index for context in contexts for index in self.plugin.consumers(context, indices)}
             if users:
                 class_usage.setdefault(path, {})[name] = sorted(users)
-            if any(context in ("", "@global") for context in contexts):
+            if any(import_context(context) for context in contexts):
                 class_global.setdefault(path, []).append(name)
         for (path, name, attribute), contexts in self.attribute_contexts.items():
             users = {index for context in contexts for index in self.plugin.consumers(context, indices)}
             if users:
                 attribute_usage.setdefault(path, {}).setdefault(name, {})[attribute] = sorted(users)
-            if any(context in ("", "@global") for context in contexts):
+            if any(import_context(context) for context in contexts):
                 attribute_global.setdefault(path, {}).setdefault(name, []).append(attribute)
         for names in class_global.values():
             names.sort()
         for names in attribute_global.values():
             for attributes in names.values():
                 attributes.sort()
-        return {"class_usage": class_usage, "attribute_usage": attribute_usage, "class_global_usage": class_global, "attribute_global_usage": attribute_global}
+        return {"class_usage": class_usage, "attribute_usage": attribute_usage,
+                "class_global_usage": class_global, "attribute_global_usage": attribute_global,
+                "class_usage_import_contexts": ["", "@global", "@collect:*"]}
 
 
 class _UsageLoader(importlib.machinery.SourceFileLoader):

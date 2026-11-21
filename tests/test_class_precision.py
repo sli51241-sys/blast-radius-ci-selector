@@ -29,7 +29,8 @@ class ClassPrecisionTests(unittest.TestCase):
         ]
         self.path = "pkg/core.py"
 
-    def select(self, old, new, class_usage, *, readers=(), import_safe=True):
+    def select(self, old, new, class_usage, *, readers=(), import_safe=True,
+               global_attributes=(), import_metadata=True):
         (self.source / self.path).write_text(old, encoding="utf-8")
         # Every module-level line was executed at collection. That alone must
         # not turn a qualified class-data edit into all test users of the file.
@@ -41,6 +42,9 @@ class ClassPrecisionTests(unittest.TestCase):
         data = {"tests": [test["id"] for test in self.tests], "files": files, "imports": {}}
         if class_usage is not None:
             data["class_usage"] = {self.path: class_usage}
+        if import_metadata:
+            data["attribute_global_usage"] = {self.path: dict(global_attributes)}
+            data["class_usage_import_contexts"] = ["", "@global", "@collect:*"]
         map_path = self.root / "coverage.json"
         map_path.write_text(json.dumps(data))
         patch_text = "".join(difflib.unified_diff(
@@ -101,6 +105,74 @@ class ClassPrecisionTests(unittest.TestCase):
         old = "class A:\n    FLAG = 1\n\ndef unrelated():\n    return 2\n"
         new = old.replace("FLAG = 1", "FLAG = 3").replace("return 2", "return 4")
         selected, _ = self.select(old, new, {"A": [0]})
+        self.assertEqual(selected, {11, 7, 23, 31})
+
+    def test_mixed_class_field_and_base_change_keeps_broad_fallback(self):
+        old = "class A(Base):\n    FLAG = 1\n"
+        new = old.replace("Base", "OtherBase").replace("FLAG = 1", "FLAG = 3")
+        selected, _ = self.select(old, new, {"A": [0]})
+        self.assertEqual(selected, {11, 7, 23, 31})
+
+    def test_other_edit_on_assignment_line_keeps_broad_fallback(self):
+        old = "class A:\n    FLAG = 1; effect(2)\n"
+        new = old.replace("FLAG = 1", "FLAG = 3").replace("effect(2)", "effect(4)")
+        selected, _ = self.select(old, new, {"A": [0]})
+        self.assertEqual(selected, {11, 7, 23, 31})
+
+    def test_changed_annotation_keeps_broad_fallback(self):
+        old = "class A:\n    FLAG: int = 1\n"
+        new = "class A:\n    FLAG: str = '3'\n"
+        selected, _ = self.select(old, new, {"A": [0]})
+        self.assertEqual(selected, {11, 7, 23, 31})
+
+    def test_multiline_class_value_can_change_line_count(self):
+        old = "class A:\n    FLAGS = {\n        'a': 1,\n    }\nclass B:\n    FLAG = 2\n"
+        new = old.replace("'a': 1,", "'a': 3,\n        'b': 4,")
+        selected, _ = self.select(old, new, {"A": [0], "B": [1]})
+        self.assertEqual(selected, {11})
+
+    def test_import_time_field_reader_keeps_broad_fallback(self):
+        old = "class A:\n    FLAG = 1\n"
+        selected, _ = self.select(old, old.replace("1", "3"), {"A": [0]},
+                                  global_attributes={"A": ["FLAG"]})
+        self.assertEqual(selected, {11, 7, 23, 31})
+
+    def test_import_time_dictionary_reader_keeps_broad_fallback(self):
+        old = "class A:\n    FLAG = 1\n"
+        selected, _ = self.select(old, old.replace("1", "3"), {"A": [0]},
+                                  global_attributes={"A": ["__dict__"]})
+        self.assertEqual(selected, {11, 7, 23, 31})
+
+    def test_missing_import_metadata_keeps_broad_fallback(self):
+        old = "class A:\n    FLAG = 1\n"
+        selected, _ = self.select(old, old.replace("1", "3"), {"A": [0]}, import_metadata=False)
+        self.assertEqual(selected, {11, 7, 23, 31})
+
+    def test_new_rhs_call_keeps_broad_fallback(self):
+        old = "class A:\n    FLAG = 1\n"
+        selected, _ = self.select(old, old.replace("1", "effect()"), {"A": [0]})
+        self.assertEqual(selected, {11, 7, 23, 31})
+
+    def test_augmented_assignment_keeps_broad_fallback(self):
+        old = "class A:\n    FLAG = 1\n    FLAG += 2\n"
+        selected, _ = self.select(old, old.replace("+= 2", "+= 3"), {"A": [0]})
+        self.assertEqual(selected, {11, 7, 23, 31})
+
+    def test_decorated_class_keeps_broad_fallback_for_generated_methods(self):
+        old = "@dataclass\nclass A:\n    FLAG: int = 1\n"
+        selected, _ = self.select(old, old.replace("1", "3"), {"A": [0]})
+        self.assertEqual(selected, {11, 7, 23, 31})
+
+    def test_generated_class_bases_keep_broad_fallback(self):
+        for base in ("Enum", "enum.IntEnum", "AutoName", "t.NamedTuple"):
+            with self.subTest(base=base):
+                old = f"class A({base}):\n    FLAG = 1\n"
+                selected, _ = self.select(old, old.replace("1", "3"), {"A": [0]})
+                self.assertEqual(selected, {11, 7, 23, 31})
+
+    def test_implicit_dunder_consumers_keep_broad_fallback(self):
+        old = "class A:\n    __match_args__ = ('a',)\n"
+        selected, _ = self.select(old, old.replace("'a'", "'b'"), {"A": [0]})
         self.assertEqual(selected, {11, 7, 23, 31})
 
 

@@ -8,6 +8,7 @@ corresponding Python class's ``__qualname__``.
 from __future__ import annotations
 
 import ast
+import copy
 from dataclasses import dataclass
 
 
@@ -120,3 +121,55 @@ def changed_bindings(
               [b for b in new_all if (b.qualname, b.attribute) == key])
         for key in sorted(keys)
     }
+
+
+def only_binding_values_changed(old_tree: ast.AST, new_tree: ast.AST, bindings: dict) -> bool:
+    """Prove the rest of the program is unchanged before using class-only users.
+
+    Line-span checks alone can overlook a second edit or a changed class header.
+    Mask only the paired assignment values, retaining targets, annotations,
+    operators, control flow, methods, and all other module statements.
+    """
+    if not bindings or any(not old or not new or len(old) != len(new)
+                           for old, new in bindings.values()):
+        return False
+
+    def normalized(tree):
+        tree = copy.deepcopy(tree)
+        values = {id(binding.value) for binding in class_bindings(tree)
+                  if (binding.qualname, binding.attribute) in bindings
+                  and binding.value is not None}
+
+        class MaskValues(ast.NodeTransformer):
+            def visit(self, node):
+                if id(node) in values:
+                    return ast.Constant(value=None)
+                return super().visit(node)
+
+        return ast.dump(MaskValues().visit(tree), include_attributes=False)
+
+    return normalized(old_tree) == normalized(new_tree)
+
+
+def literal_binding_values(bindings: dict) -> bool:
+    """Restrict narrowing to data that cannot introduce import-time calls."""
+    try:
+        for old, new in bindings.values():
+            for binding in [*old, *new]:
+                if (binding.kind == "AugAssign"
+                        or binding.attribute.startswith("__") and binding.attribute.endswith("__")):
+                    return False
+                ast.literal_eval(binding.value)
+    except (ValueError, TypeError, SyntaxError, RecursionError):
+        return False
+    return bool(bindings)
+
+
+def generated_classes(tree: ast.AST) -> bool:
+    """Generated/implicit methods can use defaults without observed receivers."""
+    generated_bases = {"Enum", "IntEnum", "StrEnum", "Flag", "IntFlag", "AutoName", "NamedTuple"}
+    return any(node.decorator_list or any(
+        (base.id if isinstance(base, ast.Name) else
+         base.attr if isinstance(base, ast.Attribute) else "") in generated_bases
+        for base in node.bases)
+        for node in ast.walk(tree) if isinstance(node, ast.ClassDef))

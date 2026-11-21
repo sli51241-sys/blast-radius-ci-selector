@@ -60,6 +60,7 @@ clock times or hidden leaderboard scores. Lower is better.
 | Official starter: all tests, three workers | 1210.470 | 0 |
 | All tests, worker-count selection | 1104.510 | 0 |
 | Coverage and dependency selection | 342.154 | 0 |
+| Literal class-data precision | 316.575 | 0 |
 
 The server additionally charges selector CPU and takes a median of repeated
 runs. Sample results do not establish correctness or ranking on unseen changes.
@@ -72,6 +73,8 @@ Install the supplied locked test environment plus `coverage==7.17.4`:
 python -m pip install -r requirements-tools.txt
 python tools/build_coverage.py --source ../sqlglot --output maps/coverage.json.gz
 python tools/build_symbols.py --source ../sqlglot --output maps/symbols.json.gz
+python tools/build_coverage.py --source ../sqlglot --class-usage --test-timeout 180 --output /tmp/classes-baseline.json.gz
+python tools/extract_class_map.py --input /tmp/classes-baseline.json.gz --output maps/classes.json.gz
 ```
 
 The measured baseline passed 1,621 tests and 25,454 subtests with
@@ -80,6 +83,13 @@ synchronously with pickle round trips so coverage includes worker execution
 and serialization. This affects map generation only. Shared pytest fixture
 setup is attributed to all its consumers. The map records its environment,
 source commit, instrumentation, and baseline outcomes.
+
+The separate class map records qualified class receivers, their base classes,
+and fields read during collection. It preserves the original line map. Class
+narrowing applies only to existing literal data values when the rest of the AST
+is unchanged and collection did not read the field or its class dictionary.
+Generated classes, augmented assignments, and special Python fields retain the
+broad fallback. An in-memory import check must also pass.
 
 ## Read the code
 
