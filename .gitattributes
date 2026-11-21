@@ -1,0 +1,2 @@
+# Preserve official unified-diff fixtures exactly, including blank context lines.
+sample/commits/*.patch -text -whitespace

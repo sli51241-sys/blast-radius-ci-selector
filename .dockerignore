@@ -1,0 +1,9 @@
+.git
+sample
+tests
+benchmarks
+__pycache__
+docs
+.coverage*
+.pytest_cache
+*.jsonl

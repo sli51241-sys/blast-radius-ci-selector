@@ -1,0 +1,10 @@
+__pycache__/
+*.py[cod]
+.coverage*
+.pytest_cache/
+.venv/
+output.jsonl
+benchmarks/*.jsonl
+benchmarks/*.log
+*.tmp
+.DS_Store

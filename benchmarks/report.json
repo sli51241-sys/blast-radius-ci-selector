@@ -1,0 +1,24 @@
+{
+  "dataset": "official 30-commit sample",
+  "cpu_note": "Local selector CPU only; official scores use server CPU and median runs.",
+  "results": {
+    "starter": {
+      "simulated_seconds": 1210.47,
+      "missed_commits": [],
+      "local_selector_cpu_seconds": 0.027077,
+      "local_selector_wall_seconds": 0.062111
+    },
+    "scheduled_all": {
+      "simulated_seconds": 1104.51,
+      "missed_commits": [],
+      "local_selector_cpu_seconds": 0.038678,
+      "local_selector_wall_seconds": 0.040557
+    },
+    "coverage": {
+      "simulated_seconds": 342.154,
+      "missed_commits": [],
+      "local_selector_cpu_seconds": 0.578583,
+      "local_selector_wall_seconds": 0.588224
+    }
+  }
+}
