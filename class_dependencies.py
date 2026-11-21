@@ -1,0 +1,122 @@
+"""Find qualified class-data bindings in the unmodified or patched AST.
+
+This module describes source structure only. It neither predicts failures nor
+uses patch/test labels. Runtime usage maps can index ``qualname`` using the
+corresponding Python class's ``__qualname__``.
+"""
+
+from __future__ import annotations
+
+import ast
+from dataclasses import dataclass
+
+
+@dataclass(frozen=True)
+class ClassBinding:
+    qualname: str
+    attribute: str
+    lineno: int
+    end_lineno: int
+    enclosing_classes: tuple[str, ...]
+    value: ast.expr | None
+    kind: str
+
+    @property
+    def usage_owners(self) -> tuple[str, ...]:
+        """Own class plus outer classes that may derive data from a nested one."""
+        return (*self.enclosing_classes, self.qualname)
+
+
+def _target_names(target: ast.expr):
+    if isinstance(target, ast.Name):
+        yield target.id
+    elif isinstance(target, (ast.Tuple, ast.List)):
+        for element in target.elts:
+            yield from _target_names(element)
+    elif isinstance(target, ast.Starred):
+        yield from _target_names(target.value)
+
+
+def class_bindings(tree: ast.AST) -> list[ClassBinding]:
+    """Index class-body bindings, including class-scope conditional assignments.
+
+    Assignments inside methods are excluded. Classes created inside functions
+    retain Python's ``<locals>`` qualification. Attribute-target writes such as
+    ``Other.FLAG = 1`` are deliberately absent: those need broader analysis.
+    """
+    found: list[ClassBinding] = []
+
+    class Visitor(ast.NodeVisitor):
+        def __init__(self):
+            self.names: list[str] = []
+            self.scopes: list[str] = []
+            self.classes: list[str] = []
+
+        def visit_ClassDef(self, node):
+            self.names.append(node.name)
+            qualname = ".".join(self.names)
+            self.scopes.append("class")
+            self.classes.append(qualname)
+            for statement in node.body:
+                self.visit(statement)
+            self.classes.pop()
+            self.scopes.pop()
+            self.names.pop()
+
+        def visit_FunctionDef(self, node):
+            self.names.extend((node.name, "<locals>"))
+            self.scopes.append("function")
+            for statement in node.body:
+                self.visit(statement)
+            self.scopes.pop()
+            del self.names[-2:]
+
+        visit_AsyncFunctionDef = visit_FunctionDef
+
+        def assignment(self, node, targets):
+            if self.scopes and self.scopes[-1] == "class":
+                for target in targets:
+                    for name in _target_names(target):
+                        found.append(ClassBinding(
+                            self.classes[-1], name, node.lineno, node.end_lineno,
+                            tuple(self.classes[:-1]), getattr(node, "value", None),
+                            type(node).__name__,
+                        ))
+            self.generic_visit(node)
+
+        def visit_Assign(self, node):
+            self.assignment(node, node.targets)
+
+        def visit_AnnAssign(self, node):
+            self.assignment(node, [node.target])
+
+        def visit_AugAssign(self, node):
+            self.assignment(node, [node.target])
+
+    Visitor().visit(tree)
+    return found
+
+
+def changed_class_bindings(tree: ast.AST, changed_lines: set[int]) -> list[ClassBinding]:
+    """Return class assignments intersecting changed lines in that AST's coordinates."""
+    return [binding for binding in class_bindings(tree)
+            if any(binding.lineno <= line <= binding.end_lineno for line in changed_lines)]
+
+
+def changed_bindings(
+    old_tree: ast.AST, new_tree: ast.AST, old_lines: set[int], new_lines: set[int]
+) -> dict[tuple[str, str], tuple[list[ClassBinding], list[ClassBinding]]]:
+    """Pair affected bindings from both trees by qualified class and attribute.
+
+    Lists preserve repeated conditional or augmented assignments. A missing
+    side signals an insertion/deletion, which callers should treat cautiously.
+    """
+    old_hits = changed_class_bindings(old_tree, old_lines)
+    new_hits = changed_class_bindings(new_tree, new_lines)
+    keys = {(b.qualname, b.attribute) for b in [*old_hits, *new_hits]}
+    old_all, new_all = class_bindings(old_tree), class_bindings(new_tree)
+    return {
+        key: ([b for b in old_all if (b.qualname, b.attribute) == key],
+              [b for b in new_all if (b.qualname, b.attribute) == key])
+        for key in sorted(keys)
+    }

@@ -75,7 +75,7 @@ def inline_process_pools():
 
 
 class CoveragePlugin:
-    def __init__(self, coverage, source: Path):
+    def __init__(self, coverage, source: Path, class_usage=False):
         self.coverage = coverage
         self.source = str(source.resolve())
         self.prefix = self.source + os.sep
@@ -88,7 +88,25 @@ class CoveragePlugin:
         self.fixture_contexts: dict[int, str] = {}
         self._path_cache: dict[str, str | None] = {}
         self._auditing = False
+        self.class_usage = None
+        if class_usage:
+            from class_usage import ClassUsage
+
+            # Discover fields before installing the file-open audit hook, so
+            # instrumentation's own source inventory is not a test dependency.
+            self.class_usage = ClassUsage(source, self)
         sys.addaudithook(self._audit)
+
+    @pytest.hookimpl(trylast=True)
+    def pytest_configure(self, config):
+        if self.class_usage:
+            # Place before pytest's assertion loader to observe test-side
+            # direct class reads as well. Assertions still execute normally.
+            self.class_usage.install()
+
+    def pytest_unconfigure(self, config):
+        if self.class_usage:
+            self.class_usage.uninstall()
 
     def relative(self, value) -> str | None:
         if not isinstance(value, (str, bytes, os.PathLike)):

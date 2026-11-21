@@ -7,6 +7,6 @@ WORKDIR /app
 # A script works with both the classic Docker builder and BuildKit.
 COPY tools/fetch_source.py /app/fetch_source.py
 RUN python /app/fetch_source.py
-COPY selector.py scheduler.py patch_analysis.py /app/
+COPY selector.py scheduler.py patch_analysis.py class_dependencies.py import_probe.py /app/
 COPY maps/ /app/maps/
 CMD ["python", "/app/selector.py"]

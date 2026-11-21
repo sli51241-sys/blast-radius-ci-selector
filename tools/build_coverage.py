@@ -207,6 +207,8 @@ def main() -> int:
     parser.add_argument("--source", required=True, type=Path)
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--native-process-pools", action="store_true", help="Disable offline inline-process instrumentation (worker coverage will be absent)")
+    parser.add_argument("--class-usage", action="store_true", help="Observe qualified runtime class/attribute users with baseline-only AST instrumentation")
+    parser.add_argument("--test-timeout", type=int, default=90, help="Per-test instrumentation timeout in seconds")
     parser.add_argument("pytest_args", nargs=argparse.REMAINDER)
     options = parser.parse_args()
     source = options.source.resolve()
@@ -222,6 +224,9 @@ def main() -> int:
     # Independent of whichever pytest plugins happen to be in a developer's
     # environment. Timeout is loaded explicitly to match the labeled setup.
     os.environ["PYTEST_DISABLE_PLUGIN_AUTOLOAD"] = "1"
+    if options.class_usage:
+        os.environ["PYTHONDONTWRITEBYTECODE"] = "1"
+        sys.dont_write_bytecode = True
     sys.path.insert(0, str(source))
     os.chdir(source)
 
@@ -231,7 +236,7 @@ def main() -> int:
     cov.start()
     from coverage_plugin import CoveragePlugin, GLOBAL_CONTEXT, inline_process_pools
 
-    plugin = CoveragePlugin(cov, source)
+    plugin = CoveragePlugin(cov, source, class_usage=options.class_usage)
     plugin.switch(GLOBAL_CONTEXT)
     if not options.native_process_pools:
         inline_process_pools()
@@ -243,7 +248,7 @@ def main() -> int:
     if not arguments:
         arguments = ["tests"]
     start = time.monotonic()
-    exit_code = int(pytest.main(["-q", "-p", "pytest_timeout", "--timeout=90", "-o", "addopts=", *arguments], plugins=[plugin]))
+    exit_code = int(pytest.main(["-q", "-p", "pytest_timeout", f"--timeout={options.test_timeout}", "-o", "addopts=", *arguments], plugins=[plugin]))
     elapsed = time.monotonic() - start
     cov.stop()
     data = cov.get_data()
@@ -295,6 +300,16 @@ def main() -> int:
         "environment": {"python": sys.version, "pytest": pytest.__version__, "coverage": coverage.__version__, "SKIP_INTEGRATION": "0"},
         "instrumentation": {"process_pool": "native-untraced" if options.native_process_pools else "inline-pickle-roundtrip"},
     }
+    if plugin.class_usage:
+        result.update(plugin.class_usage.export(indices))
+        result["instrumentation"]["class_usage"] = {
+            "version": 1,
+            "strategy": "ast-method-receivers-and-qualified-attribute-reads",
+            "mro_inclusive": True,
+            "source_files_unchanged": True,
+            "modules_instrumented": len(plugin.class_usage.loaded_modules),
+            "attribute_names_observed": len(plugin.class_usage.attribute_names),
+        }
     raw = json.dumps(result, separators=(",", ":"), ensure_ascii=True).encode()
     temporary = output.with_suffix(output.suffix + ".tmp")
     with temporary.open("wb") as stream:

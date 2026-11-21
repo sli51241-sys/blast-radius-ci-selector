@@ -15,6 +15,8 @@ from pathlib import Path
 
 from patch_analysis import PatchError, apply_patch_to_text, parse_patch
 from scheduler import schedule
+from class_dependencies import changed_bindings
+from import_probe import imports_safely
 
 ROOT = Path(__file__).resolve().parent
 
@@ -34,6 +36,10 @@ class Selector:
         self.runtime_imports: dict[str, dict[str, list[int]]] = {}
         self.import_cache: dict[str, set[int]] = {}
         self.symbols: dict = {}
+        self.class_usage: dict = {}
+        self.class_numbers: dict[int, int] = {}
+        self._active_overrides: dict[str, str] = {}
+        self._class_probe_cache: dict[tuple, bool] = {}
         if map_path and map_path.exists():
             opener = gzip.open if map_path.suffix == ".gz" else open
             with opener(map_path, "rt", encoding="utf-8") as handle:
@@ -46,6 +52,18 @@ class Selector:
                 for index, nodeid in enumerate(data["tests"])
                 if nodeid in self.by_id
             }
+            self.class_usage = data.get("class_usage", {})
+            self.class_numbers = self.map_numbers
+            classes_path = map_path.parent / "classes.json.gz"
+            if classes_path.exists():
+                with gzip.open(classes_path, "rt", encoding="utf-8") as handle:
+                    class_data = json.load(handle)
+                self.class_usage = class_data["class_usage"]
+                self.class_numbers = {
+                    index: self.by_id[nodeid]
+                    for index, nodeid in enumerate(class_data["tests"])
+                    if nodeid in self.by_id
+                }
             symbols_path = map_path.parent / "symbols.json.gz"
             if symbols_path.exists():
                 with gzip.open(symbols_path, "rt", encoding="utf-8") as handle:
@@ -116,6 +134,21 @@ class Selector:
             if set(info.get("global", [])).intersection(lines):
                 result.update(self.file_tests(path) | self.import_users(path))
         return result
+
+    def class_users(self, path: str, owners) -> set[int] | None:
+        """Return observed users of specific classes, or decline to narrow."""
+        classes = self.class_usage.get(path, {})
+        if not owners or any(owner not in classes for owner in owners):
+            return None
+        return {self.class_numbers[index] for owner in owners for index in classes[owner]
+                if index in self.class_numbers}
+
+    def _class_import_safe(self, path: str, new_text: str) -> bool:
+        overrides = {**self._active_overrides, path: new_text}
+        key = tuple(sorted(overrides.items()))
+        if key not in self._class_probe_cache:
+            self._class_probe_cache[key] = imports_safely(self.source, overrides)
+        return self._class_probe_cache[key]
 
     @staticmethod
     def changed_class_data(tree: ast.Module, lines: set[int]) -> set[str]:
@@ -205,6 +238,19 @@ class Selector:
         class_names = self.changed_class_data(old_tree, set(change.get("old_lines", [])))
         class_names.update(self.changed_class_data(new_tree, set(change.get("new_lines", []))))
         if class_names:
+            bindings = changed_bindings(old_tree, new_tree, set(change.get("old_lines", [])),
+                                        set(change.get("new_lines", [])))
+            # Only replace the existing broad selection for existing bindings.
+            # Adding/removing fields can affect users absent from baseline maps.
+            if bindings and all(old and new and len(old) == len(new)
+                                for old, new in bindings.values()):
+                owners = {owner for old, new in bindings.values() for binding in [*old, *new]
+                          for owner in binding.usage_owners}
+                users = self.class_users(path, owners)
+                if users is not None:
+                    if not self._class_import_safe(path, new_text):
+                        return self.all_numbers, "class import failed; broad fallback"
+                    return users | readers, "qualified class users"
             result = self.file_tests(path) | self.import_users(path) | self.attribute_users(class_names)
             return result, "class data and attribute consumers"
 
@@ -245,6 +291,15 @@ class Selector:
             return self.tests, ["invalid patch fallback"]
         if not changes:
             return self.tests, ["empty patch fallback"]
+        self._active_overrides = {}
+        for change in changes:
+            path = change.get("old_path")
+            if path and path.endswith(".py") and path == change.get("new_path"):
+                try:
+                    text, _ = self.original(path)
+                    self._active_overrides[path] = apply_patch_to_text(text, change)
+                except (OSError, ValueError, SyntaxError, LookupError, UnicodeError, PatchError):
+                    pass
         numbers: set[int] = set(self.unmapped_numbers)
         reasons = []
         for change in changes:
