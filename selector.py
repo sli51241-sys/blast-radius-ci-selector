@@ -20,6 +20,7 @@ from class_dependencies import (
 )
 from import_probe import imports_safely
 from lambda_analysis import changed_lambda_bodies
+from class_projection import dict_values_import_safe
 
 ROOT = Path(__file__).resolve().parent
 CLASS_IMPORT_CONTEXTS = ["", "@global", "@collect:*"]
@@ -42,6 +43,8 @@ class Selector:
         self.symbols: dict = {}
         self.class_usage: dict = {}
         self.attribute_global_usage: dict | None = None
+        self.class_import_sites: dict | None = None
+        self.source_commit: str | None = None
         self.class_numbers: dict[int, int] = {}
         self._active_overrides: dict[str, str] = {}
         self._class_probe_cache: dict[tuple, bool] = {}
@@ -50,6 +53,7 @@ class Selector:
             with opener(map_path, "rt", encoding="utf-8") as handle:
                 data = json.load(handle)
             self.files = data["files"]
+            self.source_commit = data.get("commit")
             self.imports = data.get("imports", {})
             self.runtime_imports = data.get("runtime_imports", {})
             self.map_numbers = {
@@ -79,6 +83,12 @@ class Selector:
             if symbols_path.exists():
                 with gzip.open(symbols_path, "rt", encoding="utf-8") as handle:
                     self.symbols = json.load(handle)
+            sites_path = map_path.parent / "import-sites.json.gz"
+            if sites_path.exists():
+                with gzip.open(sites_path, "rt", encoding="utf-8") as handle:
+                    sites = json.load(handle)
+                if sites.get("pinned_commit") == self.source_commit and sites.get("complete") is True:
+                    self.class_import_sites = sites
         self.unmapped_numbers = self.all_numbers - set(self.map_numbers.values())
 
     def numbers(self, indices) -> set[int]:
@@ -168,6 +178,23 @@ class Selector:
         observed = self.attribute_global_usage.get(path, {})
         return all(not {attribute, "__dict__"}.intersection(observed.get(owner, []))
                    for owner, attribute in bindings)
+
+    def class_imports_unchanged(self, path: str, bindings: dict, old_tree: ast.Module) -> bool:
+        """Prove import-time dictionary projections survive a literal value edit."""
+        if self.attribute_global_usage is None:
+            return False
+        observed = self.attribute_global_usage.get(path, {})
+        for (owner, attribute), (old, new) in bindings.items():
+            if not {attribute, "__dict__"}.intersection(observed.get(owner, [])):
+                continue
+            if len(old) != 1 or len(new) != 1 or not dict_values_import_safe(
+                source=self.source, path=path, owner=owner, attribute=attribute,
+                old_value=old[0].value, new_value=new[0].value, old_tree=old_tree,
+                metadata=self.class_import_sites, changed_paths=set(self._active_overrides),
+                expected_commit=self.source_commit,
+            ):
+                return False
+        return True
 
     @staticmethod
     def changed_class_data(tree: ast.Module, lines: set[int]) -> set[str]:
@@ -261,7 +288,14 @@ class Selector:
                                         set(change.get("new_lines", [])))
             # A callback body can change without rebuilding its enclosing class
             # data. Preserve the entire lambda signature and surrounding AST.
-            deferred = changed_lambda_bodies(old_tree, new_tree)
+            # The practice run showed that checking every lambda in unrelated
+            # class edits adds CPU without improving their selections.
+            touched = self.impact_lines(change)
+            lambda_edit = any(isinstance(node, ast.Lambda)
+                              and any(node.lineno <= line <= node.end_lineno for line in touched)
+                              for old, new in bindings.values() for binding in old
+                              if binding.value is not None for node in ast.walk(binding.value))
+            deferred = changed_lambda_bodies(old_tree, new_tree) if lambda_edit else None
             if deferred and not info.get("global_read"):
                 spans = {line for node in deferred
                          for line in range(node.lineno, node.end_lineno + 1)}
@@ -281,7 +315,7 @@ class Selector:
             if (only_binding_values_changed(old_tree, new_tree, bindings)
                     and literal_binding_values(bindings)
                     and not generated_classes(old_tree)
-                    and self.class_fields_uncached(path, bindings)):
+                    and self.class_imports_unchanged(path, bindings, old_tree)):
                 owners = {owner for old, new in bindings.values() for binding in [*old, *new]
                           for owner in binding.usage_owners}
                 users = self.class_users(path, owners)
