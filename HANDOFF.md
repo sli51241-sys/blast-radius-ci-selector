@@ -1,28 +1,41 @@
 # Session handoff
 
-Updated November 21, 2026 after the class-data precision check.
+Updated November 21, 2026 after three accepted precision improvements.
 
 ## Current state
 
 - Repository: https://github.com/sli51241-sys/blast-radius-ci-selector (`main`).
-- Class-data precision checkpoint prepared for a new practice run; the practice score below is the last completed result.
-- Final `make sample`: **316.575 simulated seconds**, **0 misses across 30 commits**. This saves **25.579 seconds (7.48%)** against 342.154 seconds.
-- Only sample schedule `535z` changed: `TSQL.WEEK_OFFSET` now selects **171** tests instead of **1,617**, reducing its cost from **36.817** to **11.238** seconds. All other 29 schedules are unchanged. This is evaluation evidence; no patch identifiers or sample answers are used by runtime selection.
-- All **69 unit tests** passed. The new pinned-baseline map passed **1,621 tests and 25,454 subtests**. The map-generation timeout was raised to 180 seconds after the instrumented `test_max_nodes` exceeded 90 seconds.
-- Three local restricted-container runs measured median selector CPU **1.485 seconds before** and **2.303 seconds after** (about **0.817 seconds added**). These are not official server CPU measurements.
-- Previous official practice: **388.1 seconds**, scored commit `c7ab054e57d05126b593ccf3c43ad0a1d80ab8c9`, team `dalladalla`. No new practice submission was made. The latest historical checkpoint before these local changes is `edf3606`.
+- Optimization stopped after **three accepted improvements**, before the two-hour limit.
+- Current `make sample`: **223.421 simulated seconds**, **0 misses across 30 commits**, down from **316.575** at the start of this run.
+- All **165 focused checks** passed in the locked Python environment, including the map collector integration check. Three candidate sample runs passed; no sample misses or sample rollbacks occurred.
+- Improvement 1 was pushed as `a9d7498b3d39c45cffc1639079c14bbfa9dcb28a`. Improvements 2 and 3 remain local; the stop condition occurred before the next hourly push/practice checkpoint.
 
-## Active improvement
+## Accepted changes
 
-`maps/classes.json.gz` is now active alongside the unchanged original line coverage and symbols maps. It contains only pinned-baseline class usage and provenance. Class observations include MRO users, nested-class outer owners, and collection-time attribute/dictionary reads. The export now recognizes `@collect:*` contexts and `vars()` dictionary reads.
+| Target | Change | Tests before → after | Case seconds before → after | Total sample before → after |
+| --- | --- | ---: | ---: | ---: |
+| `6ze8` | Isolated deferred lambda bodies, with qualified class users retained | 1,617 → 31 | 36.817 → 2.418 | 316.575 → 282.176 |
+| `4d63` | Prove import/collection consumers inspect unchanged dictionary keys | 1,617 → 374 | 36.817 → 12.686 | 282.176 → 258.045 |
+| `gbav` | Source-proven pure callback factories with literal argument edits | 1,617 → 32 | 36.817 → 2.193 | 258.045 → 223.421 |
 
-Narrowing applies only to replacements of existing literal class-data values. An AST comparison proves that the rest of the module is unchanged, fixing the mixed class-field/function edit gap. Imported/cached fields, augmented assignments, dunder fields, modules containing decorated or known generated classes, missing metadata, and failed import probes retain broad selection. The selector verifies that a separate class map matches the original map's pinned source commit and collection-context schema.
+Each loop selected one of the current maximum-cost commits, with ties at 36.817 seconds. Runtime contains no patch IDs or sample-answer lookup tables. Evaluation records are separate from the image.
 
-## Reproduce
+## Real practice feedback
 
-Run `python3 -m unittest discover -s tests` and `make sample`.
-The README includes commands to rebuild the original maps and to generate/extract the separate class map with a 180-second instrumentation timeout. `benchmarks/report.json` records the new sample result and CPU comparison.
+- Latest tested checkpoint: **340.3 seconds**, receipt **BB-B6DEE032**, commit `a9d7498b3d39c45cffc1639079c14bbfa9dcb28a`.
+- All three runs: **333.995 simulated seconds**, **0 missed commits**; CPU **6.28, 6.33, 5.88** seconds.
+- This was worse than the prior **338.3** score for `99a1991a0913e9cab61b086ab060574ecdbb892e`: simulated cost was unchanged and median CPU rose from 4.27 to 6.28 seconds. The sample gain did not transfer to this hidden practice batch.
+- The team's best remained **338.3 seconds**, **rank 232/330 when checked**. This is the team's best-entry rank, not a separate rank assigned to the worse submission.
+- Improvement 2 limits lambda analysis to a touched lambda span to address this overhead. No official practice result exists yet for improvements 2 or 3, so their real effect is unknown.
+- No final-entry picker was clicked. The site's automatic best-score final default was left alone.
+- The next practice checkpoint in this run would have been no earlier than **22:58:19 UTC / 2:58:19 p.m. Pacific**. Work stopped at the three-improvement limit first.
+
+## Validation and guardrails
+
+The original `maps/coverage.json.gz`, `maps/coverage-v2.json.gz`, and `maps/symbols.json.gz` remain unchanged. `maps/import-sites.json.gz` is derived from the pinned source: **184 library modules**, collection of **1,621 tests across 58 test modules**, zero tests executed, complete instrumentation, and no unresolved sites. Library-import-only metadata was deemed insufficient and expanded before the sample candidate was accepted.
+
+Mixed edits, unknown/default/import-time execution, source readers, generated classes, callback factory side effects/shadowing, dictionary value consumers, and missing metadata keep conservative fallbacks. Reproduction commands are in the README. The offline map builder discloses inert CLI handling and source/instrumenter digests.
 
 ## Next
 
-Keep the zero-miss checkpoint. The remaining class-data fallbacks still select nearly all tests; table/callback changes need additional dependency evidence before narrowing. RWX allows one submission per hour and only the final submission counts. Submissions close November 22 at 8 a.m. Pacific.
+Review the practice regression before making further precision changes. `ktz3` remains at 36.817 seconds and 1,617 selected tests; it changes expression class metadata with real import-time consumers. Do not assume a low sample cost implies a low hidden score. The official final deadline is November 22 at 8 a.m. Pacific.

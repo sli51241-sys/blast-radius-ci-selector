@@ -30,7 +30,7 @@ class ClassPrecisionTests(unittest.TestCase):
         self.path = "pkg/core.py"
 
     def select(self, old, new, class_usage, *, readers=(), import_safe=True,
-               global_attributes=(), import_metadata=True):
+               global_attributes=(), import_metadata=True, global_read=False):
         (self.source / self.path).write_text(old, encoding="utf-8")
         # Every module-level line was executed at collection. That alone must
         # not turn a qualified class-data edit into all test users of the file.
@@ -38,6 +38,7 @@ class ClassPrecisionTests(unittest.TestCase):
             "lines": {str(n): list(range(4)) for n in range(1, len(old.splitlines()) + 1)},
             "global": list(range(1, len(old.splitlines()) + 1)),
             "reads": list(readers),
+            "global_read": global_read,
         }}
         data = {"tests": [test["id"] for test in self.tests], "files": files, "imports": {}}
         if class_usage is not None:
@@ -173,6 +174,46 @@ class ClassPrecisionTests(unittest.TestCase):
     def test_implicit_dunder_consumers_keep_broad_fallback(self):
         old = "class A:\n    __match_args__ = ('a',)\n"
         selected, _ = self.select(old, old.replace("'a'", "'b'"), {"A": [0]})
+        self.assertEqual(selected, {11, 7, 23, 31})
+
+    FACTORY_SOURCE = (
+        "def make(flag):\n"
+        "    def callback():\n"
+        "        return flag\n"
+        "    return callback\n"
+        "class A:\n"
+        "    HANDLERS = {'x': make(True)}\n"
+        "class B:\n"
+        "    FLAG = 2\n"
+    )
+
+    def test_pure_callback_factory_keeps_class_users_and_readers(self):
+        old = self.FACTORY_SOURCE
+        selected, reasons = self.select(old, old.replace("make(True)", "make(False)"),
+                                       {"A": [0], "B": [1]}, readers=[3])
+        self.assertEqual(selected, {11, 31})
+        self.assertIn("deferred callback factory", reasons[0])
+
+    def test_factory_with_immediate_effect_keeps_broad_fallback(self):
+        old = self.FACTORY_SOURCE.replace("    def callback():", "    effect(flag)\n    def callback():")
+        selected, _ = self.select(old, old.replace("make(True)", "make(False)"), {"A": [0], "B": [1]})
+        self.assertEqual(selected, {11, 7, 23, 31})
+
+    def test_factory_table_consumed_at_collection_keeps_broad_fallback(self):
+        old = self.FACTORY_SOURCE
+        selected, _ = self.select(old, old.replace("make(True)", "make(False)"),
+                                  {"A": [0], "B": [1]}, global_attributes={"A": ["HANDLERS"]})
+        self.assertEqual(selected, {11, 7, 23, 31})
+
+    def test_factory_invoked_from_bare_class_name_keeps_broad_fallback(self):
+        old = self.FACTORY_SOURCE.replace("class B:", "    CACHED = HANDLERS['x']()\nclass B:")
+        selected, _ = self.select(old, old.replace("make(True)", "make(False)"), {"A": [0], "B": [1]})
+        self.assertEqual(selected, {11, 7, 23, 31})
+
+    def test_factory_change_with_collection_source_reader_keeps_broad_fallback(self):
+        old = self.FACTORY_SOURCE
+        selected, _ = self.select(old, old.replace("make(True)", "make(False)"),
+                                  {"A": [0], "B": [1]}, global_read=True)
         self.assertEqual(selected, {11, 7, 23, 31})
 
 

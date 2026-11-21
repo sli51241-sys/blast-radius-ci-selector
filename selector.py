@@ -21,6 +21,7 @@ from class_dependencies import (
 from import_probe import imports_safely
 from lambda_analysis import changed_lambda_bodies
 from class_projection import dict_values_import_safe
+from factory_analysis import changed_factory_arguments
 
 ROOT = Path(__file__).resolve().parent
 CLASS_IMPORT_CONTEXTS = ["", "@global", "@collect:*"]
@@ -309,6 +310,20 @@ class Selector:
                         if not self._class_import_safe(path, new_text):
                             return self.all_numbers, "callback import failed; broad fallback"
                         return covered | users | readers, "deferred callback and qualified class users"
+            # A source-proven factory whose body only creates and returns a
+            # callback cannot run the changed literal arguments during import.
+            if (not info.get("global_read")
+                    and changed_factory_arguments(old_tree, new_tree, bindings,
+                                                  self.source, self._active_overrides)
+                    and not generated_classes(old_tree)
+                    and self.class_fields_uncached(path, bindings)):
+                owners = {owner for old, new in bindings.values() for binding in [*old, *new]
+                          for owner in binding.usage_owners}
+                users = self.class_users(path, owners)
+                if users is not None:
+                    if not self._class_import_safe(path, new_text):
+                        return self.all_numbers, "callback factory import failed; broad fallback"
+                    return users | readers, "deferred callback factory and qualified class users"
             # Only replace the existing broad selection for existing bindings.
             # Adding/removing fields can affect users absent from baseline maps.
             # Generated methods can be absent from baseline receiver tracing.

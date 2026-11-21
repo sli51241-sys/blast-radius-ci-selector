@@ -63,6 +63,16 @@ may have cached a copy. A fresh interpreter checks that the modified modules and
 derived dialects still import. Generated classes, augmented assignments, special
 Python fields, and other class edits keep the broader selection.
 
+Two additional proofs handle deferred callbacks: isolated lambda-body edits
+preserve their definitions and surrounding program, while literal arguments to
+source-proven pure callback factories change only the returned callbacks. Both
+include qualified class users and retain import/source-reader guards.
+
+For literal dictionaries read during imports or test collection, a separate
+read-site map can establish that the consumers inspect only keys. Keeping those
+keys unchanged preserves these import computations; unknown flows or any value
+consumer retain the broad fallback. The original coverage map is preserved.
+
 The baseline map cannot prove that every possible new behavior has been covered.
 Import-time changes, new dependencies, and cached file reads are important
 sources of uncertainty. The 300-second miss penalty makes conservative fallbacks

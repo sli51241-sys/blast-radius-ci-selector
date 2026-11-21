@@ -24,6 +24,30 @@
       "simulated_seconds": 316.575,
       "missed_commits": [],
       "validation": "make sample (Linux/AMD64 Docker)"
+    },
+    "deferred_class_callbacks": {
+      "simulated_seconds": 282.176,
+      "missed_commits": [],
+      "validation": "make sample (Linux/AMD64 Docker)",
+      "target_commit": "6ze8",
+      "target_selected_tests": 31,
+      "target_simulated_seconds": 2.418
+    },
+    "key_only_import_projections": {
+      "simulated_seconds": 258.045,
+      "missed_commits": [],
+      "validation": "make sample (Linux/AMD64 Docker)",
+      "target_commit": "4d63",
+      "target_selected_tests": 374,
+      "target_simulated_seconds": 12.686
+    },
+    "pure_callback_factories": {
+      "simulated_seconds": 223.421,
+      "missed_commits": [],
+      "validation": "make sample (Linux/AMD64 Docker)",
+      "target_commit": "gbav",
+      "target_selected_tests": 32,
+      "target_simulated_seconds": 2.193
     }
   },
   "class_precision_cpu_comparison": {
@@ -43,5 +67,26 @@
     "baseline_median_seconds": 1.4850249999999998,
     "class_precision_median_seconds": 2.302522,
     "added_median_seconds": 0.8174970000000004
+  },
+  "precision_loop_practice": {
+    "receipt": "BB-B6DEE032",
+    "commit": "a9d7498b3d39c45cffc1639079c14bbfa9dcb28a",
+    "score_seconds": 340.3,
+    "simulated_seconds": 333.995,
+    "cpu_seconds": [
+      6.28,
+      6.33,
+      5.88
+    ],
+    "missed_commits": [
+      0,
+      0,
+      0
+    ],
+    "team_best_seconds": 338.3,
+    "team_best_rank_at_check": 232,
+    "teams_at_check": 330,
+    "improved": false,
+    "notes": "This measures improvement1 only; improvements2and3 have not been submitted."
   }
 }

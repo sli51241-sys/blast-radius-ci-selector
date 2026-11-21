@@ -36,7 +36,7 @@ JSON lines.
 With a Python 3.13 environment and the pinned source at `../sqlglot`:
 
 ```sh
-python -m unittest discover -s tests -v
+CLASS_USAGE_TOOL="$PWD/tools/class_usage.py" python -m unittest discover -s tests -v
 python tools/benchmark.py --source ../sqlglot
 python selector.py --data sample --source ../sqlglot > output.jsonl
 python score.py sample sample/answers.json output.jsonl
@@ -61,6 +61,9 @@ clock times or hidden leaderboard scores. Lower is better.
 | All tests, worker-count selection | 1104.510 | 0 |
 | Coverage and dependency selection | 342.154 | 0 |
 | Literal class-data precision | 316.575 | 0 |
+| Deferred class callbacks | 282.176 | 0 |
+| Key-only import projections | 258.045 | 0 |
+| Pure callback factories | 223.421 | 0 |
 
 The server additionally charges selector CPU and takes a median of repeated
 runs. Sample results do not establish correctness or ranking on unseen changes.
@@ -75,6 +78,7 @@ python tools/build_coverage.py --source ../sqlglot --output maps/coverage.json.g
 python tools/build_symbols.py --source ../sqlglot --output maps/symbols.json.gz
 python tools/build_coverage.py --source ../sqlglot --class-usage --test-timeout 180 --output /tmp/classes-baseline.json.gz
 python tools/extract_class_map.py --input /tmp/classes-baseline.json.gz --output maps/classes.json.gz
+python -B tools/build_import_sites.py --source ../sqlglot --class-usage-tool tools/class_usage.py --output maps/import-sites.json.gz
 ```
 
 The measured baseline passed 1,621 tests and 25,454 subtests with
@@ -90,6 +94,19 @@ narrowing applies only to existing literal data values when the rest of the AST
 is unchanged and collection did not read the field or its class dictionary.
 Generated classes, augmented assignments, and special Python fields retain the
 broad fallback. An in-memory import check must also pass.
+
+Deferred callback edits have separate structural proofs. Lambda-body edits keep
+the signature and surrounding AST unchanged, require no collection execution,
+and include both callback coverage and qualified class users. Literal argument
+edits to callback factories require source that only constructs and returns a
+callback, unchanged call structure, and no import-time value consumers.
+
+A separate pinned-source map records qualified attribute read sites during all
+library imports and collection of all baseline tests, without executing tests.
+Existing literal dictionaries can narrow when their keys are unchanged and every
+observed import/collection consumer is proven to inspect only those keys. Value
+reads, unknown flows, stale maps, and mixed source edits retain broad selection.
+The map builder records its inert CLI handling and source/instrumenter digests.
 
 ## Read the code
 
