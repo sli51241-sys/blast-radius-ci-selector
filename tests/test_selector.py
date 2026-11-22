@@ -51,6 +51,26 @@ class SelectorTests(unittest.TestCase):
         selected, _ = self.select("pkg/core.py", old, old.replace("return 1", "return 3"))
         self.assertEqual(selected, {0, 2})
 
+    def test_body_edit_keeps_import_time_function_metadata_cache_consumer(self):
+        old = "def alpha():\n    return 1\nCACHED = alpha.__code__.co_consts[-1]\n"
+        self.write("pkg/core.py", old, lines={"1": [0, 1], "2": [1], "3": [0]},
+                   **{"global": [1, 3]})
+        selected, _ = self.select("pkg/core.py", old, old.replace("return 1", "return 2"))
+        self.assertTrue({0, 1}.issubset(selected))
+
+    def test_body_edit_keeps_class_initialization_metadata_consumer(self):
+        old = ("class Meta(type):\n"
+               "    def __new__(meta, name, bases, attrs):\n"
+               "        attrs['CACHED'] = attrs['alpha'].__code__.co_consts[-1]\n"
+               "        return super().__new__(meta, name, bases, attrs)\n"
+               "class A(metaclass=Meta):\n"
+               "    def alpha(self):\n"
+               "        return 1\n")
+        self.write("pkg/core.py", old, lines={"6": [0, 1], "7": [1]},
+                   **{"global": [1, 2, 3, 4, 5, 6]})
+        selected, _ = self.select("pkg/core.py", old, old.replace("return 1", "return 2"))
+        self.assertTrue({0, 1}.issubset(selected))
+
     def test_definition_change_includes_measured_runtime_import_consumer(self):
         old = "def alpha(value=1):\n    return value\n"
         self.write("pkg/core.py", old, lines={"2": [0]})
