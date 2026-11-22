@@ -16,7 +16,7 @@ from pathlib import Path
 from patch_analysis import PatchError, apply_patch_to_text, parse_patch
 from scheduler import schedule
 from class_dependencies import (
-    changed_bindings, generated_classes, literal_binding_values, only_binding_values_changed,
+    changed_bindings, generated_classes, literal_binding_values, only_binding_values_changed, statement_classes,
 )
 from import_probe import imports_safely
 from lambda_analysis import changed_lambda_bodies
@@ -210,9 +210,7 @@ class Selector:
     @staticmethod
     def changed_class_data(tree: ast.Module, lines: set[int]) -> set[str]:
         names: set[str] = set()
-        for node in ast.walk(tree):
-            if not isinstance(node, ast.ClassDef):
-                continue
+        for node in statement_classes(tree):
             for statement in node.body:
                 if not isinstance(statement, (ast.Assign, ast.AnnAssign, ast.AugAssign)):
                     continue

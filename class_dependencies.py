@@ -54,6 +54,13 @@ def class_bindings(tree: ast.AST) -> list[ClassBinding]:
             self.scopes: list[str] = []
             self.classes: list[str] = []
 
+        def generic_visit(self, node):
+            # Assignment values, targets and annotations contain expressions,
+            # never class/function statement definitions or class assignments.
+            for child in ast.iter_child_nodes(node):
+                if isinstance(child, (ast.stmt, ast.ExceptHandler, ast.match_case)):
+                    self.visit(child)
+
         def visit_ClassDef(self, node):
             self.names.append(node.name)
             qualname = ".".join(self.names)
@@ -157,6 +164,17 @@ def literal_binding_values(bindings: dict) -> bool:
     return bool(bindings)
 
 
+def statement_classes(tree: ast.AST):
+    """Yield classes through statement suites without visiting expressions."""
+    pending = [tree]
+    while pending:
+        node = pending.pop()
+        if isinstance(node, ast.ClassDef):
+            yield node
+        pending.extend(child for child in ast.iter_child_nodes(node)
+                       if isinstance(child, (ast.stmt, ast.ExceptHandler, ast.match_case)))
+
+
 def generated_classes(tree: ast.AST) -> bool:
     """Generated/implicit methods can use defaults without observed receivers."""
     generated_bases = {"Enum", "IntEnum", "StrEnum", "Flag", "IntFlag", "AutoName", "NamedTuple"}
@@ -164,4 +182,4 @@ def generated_classes(tree: ast.AST) -> bool:
         (base.id if isinstance(base, ast.Name) else
          base.attr if isinstance(base, ast.Attribute) else "") in generated_bases
         for base in node.bases)
-        for node in ast.walk(tree) if isinstance(node, ast.ClassDef))
+        for node in statement_classes(tree))
