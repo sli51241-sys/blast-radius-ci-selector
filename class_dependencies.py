@@ -8,8 +8,9 @@ corresponding Python class's ``__qualname__``.
 from __future__ import annotations
 
 import ast
-import copy
 from dataclasses import dataclass
+
+from ast_compare import ast_equal
 
 
 @dataclass(frozen=True)
@@ -112,10 +113,12 @@ def changed_bindings(
     Lists preserve repeated conditional or augmented assignments. A missing
     side signals an insertion/deletion, which callers should treat cautiously.
     """
-    old_hits = changed_class_bindings(old_tree, old_lines)
-    new_hits = changed_class_bindings(new_tree, new_lines)
-    keys = {(b.qualname, b.attribute) for b in [*old_hits, *new_hits]}
     old_all, new_all = class_bindings(old_tree), class_bindings(new_tree)
+    old_hits = [binding for binding in old_all
+                if any(binding.lineno <= line <= binding.end_lineno for line in old_lines)]
+    new_hits = [binding for binding in new_all
+                if any(binding.lineno <= line <= binding.end_lineno for line in new_lines)]
+    keys = {(b.qualname, b.attribute) for b in [*old_hits, *new_hits]}
     return {
         key: ([b for b in old_all if (b.qualname, b.attribute) == key],
               [b for b in new_all if (b.qualname, b.attribute) == key])
@@ -134,21 +137,10 @@ def only_binding_values_changed(old_tree: ast.AST, new_tree: ast.AST, bindings: 
                            for old, new in bindings.values()):
         return False
 
-    def normalized(tree):
-        tree = copy.deepcopy(tree)
-        values = {id(binding.value) for binding in class_bindings(tree)
-                  if (binding.qualname, binding.attribute) in bindings
-                  and binding.value is not None}
-
-        class MaskValues(ast.NodeTransformer):
-            def visit(self, node):
-                if id(node) in values:
-                    return ast.Constant(value=None)
-                return super().visit(node)
-
-        return ast.dump(MaskValues().visit(tree), include_attributes=False)
-
-    return normalized(old_tree) == normalized(new_tree)
+    replacements = {id(before.value): id(after.value)
+                    for old, new in bindings.values() for before, after in zip(old, new)
+                    if before.value is not None and after.value is not None}
+    return ast_equal(old_tree, new_tree, replacements)
 
 
 def literal_binding_values(bindings: dict) -> bool:

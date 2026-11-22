@@ -22,6 +22,7 @@ from import_probe import imports_safely
 from lambda_analysis import changed_lambda_bodies
 from class_projection import dict_values_import_safe
 from factory_analysis import changed_factory_arguments
+from ast_compare import ast_equal
 
 ROOT = Path(__file__).resolve().parent
 CLASS_IMPORT_CONTEXTS = ["", "@global", "@collect:*"]
@@ -41,6 +42,8 @@ class Selector:
         self.imports: dict[str, list[str]] = {}
         self.runtime_imports: dict[str, dict[str, list[int]]] = {}
         self.import_cache: dict[str, set[int]] = {}
+        self._file_tests_cache: dict[str, frozenset[int]] = {}
+        self._dynamic_attribute_users: frozenset[int] | None = None
         self.symbols: dict = {}
         self.class_usage: dict = {}
         self.attribute_global_usage: dict | None = None
@@ -99,9 +102,12 @@ class Selector:
         return self.numbers(self.files.get(path, {}).get("reads", []))
 
     def file_tests(self, path: str) -> set[int]:
+        if path in self._file_tests_cache:
+            return set(self._file_tests_cache[path])
         result = self.readers(path) | self.by_file.get(path, set())
         for indices in self.files.get(path, {}).get("lines", {}).values():
             result.update(self.numbers(indices))
+        self._file_tests_cache[path] = frozenset(result)
         return result
 
     def import_users(self, path: str) -> set[int]:
@@ -146,8 +152,12 @@ class Selector:
         for name in names:
             for path, lines in self.symbols.get("attributes", {}).get(name, {}).items():
                 locations.setdefault(path, set()).update(lines)
-        for path, lines in self.symbols.get("dynamic_attributes", {}).items():
-            locations.setdefault(path, set()).update(lines)
+        if self._dynamic_attribute_users is None:
+            self._dynamic_attribute_users = frozenset(self._attribute_location_users(
+                self.symbols.get("dynamic_attributes", {})))
+        return set(self._dynamic_attribute_users) | self._attribute_location_users(locations)
+
+    def _attribute_location_users(self, locations: dict) -> set[int]:
         result: set[int] = set()
         for path, lines in locations.items():
             info = self.files.get(path, {})
@@ -273,7 +283,7 @@ class Selector:
             compile(new_tree, path, "exec", dont_inherit=True)
         except (OSError, ValueError, SyntaxError, LookupError, UnicodeError, PatchError):
             return self.all_numbers, "unparseable module"
-        if ast.dump(old_tree, include_attributes=False) == ast.dump(new_tree, include_attributes=False):
+        if ast_equal(old_tree, new_tree):
             # Compare parsed programs rather than treating a kind of edit as
             # harmless. Raw-source readers still need to run.
             if info.get("global_read"):
@@ -327,9 +337,9 @@ class Selector:
             # Only replace the existing broad selection for existing bindings.
             # Adding/removing fields can affect users absent from baseline maps.
             # Generated methods can be absent from baseline receiver tracing.
-            if (only_binding_values_changed(old_tree, new_tree, bindings)
-                    and literal_binding_values(bindings)
+            if (literal_binding_values(bindings)
                     and not generated_classes(old_tree)
+                    and only_binding_values_changed(old_tree, new_tree, bindings)
                     and self.class_imports_unchanged(path, bindings, old_tree)):
                 owners = {owner for old, new in bindings.values() for binding in [*old, *new]
                           for owner in binding.usage_owners}

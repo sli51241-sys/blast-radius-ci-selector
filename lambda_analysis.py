@@ -6,7 +6,8 @@ execution and use baseline coverage or qualified class-user observations.
 from __future__ import annotations
 
 import ast
-import copy
+
+from ast_compare import ast_equal
 
 
 def _lambda_inventory(tree: ast.AST):
@@ -45,9 +46,9 @@ def changed_lambda_bodies(old_tree: ast.AST, new_tree: ast.AST) -> list[ast.Lamb
     changed = []
     for path, (before, depth) in old.items():
         after, _ = new[path]
-        if ast.dump(before.args, include_attributes=False) != ast.dump(after.args, include_attributes=False):
+        if not ast_equal(before.args, after.args):
             return None
-        if ast.dump(before.body, include_attributes=False) == ast.dump(after.body, include_attributes=False):
+        if ast_equal(before.body, after.body):
             continue
         # An enclosing body's mask could otherwise hide a nested signature or
         # structure change. Leave all such cases to the caller's broad path.
@@ -57,14 +58,10 @@ def changed_lambda_bodies(old_tree: ast.AST, new_tree: ast.AST) -> list[ast.Lamb
             return None
         changed.append(before)
 
-    class MaskBodies(ast.NodeTransformer):
-        def visit_Lambda(self, node):
-            node.body = ast.Constant(value=None)
-            return node
-
-    def normalized(tree):
-        return ast.dump(MaskBodies().visit(copy.deepcopy(tree)), include_attributes=False)
-
-    if normalized(old_tree) != normalized(new_tree):
+    # The former transformer masked only outermost lambda bodies, without
+    # traversing their defaults. Signature checks above remain unmasked.
+    replacements = {id(before.body): id(new[path][0].body)
+                    for path, (before, depth) in old.items() if not depth}
+    if not ast_equal(old_tree, new_tree, replacements):
         return None
     return changed
