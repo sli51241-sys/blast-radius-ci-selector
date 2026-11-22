@@ -23,7 +23,6 @@ from lambda_analysis import changed_lambda_bodies
 from class_projection import dict_values_import_safe
 from factory_analysis import changed_factory_arguments
 from ast_compare import ast_equal
-from runtime_body import runtime_body_lines
 
 ROOT = Path(__file__).resolve().parent
 CLASS_IMPORT_CONTEXTS = ["", "@global", "@collect:*"]
@@ -372,9 +371,6 @@ class Selector:
                     self.all_numbers, "unknown definition users"
                 )
             expanded.update(range(node.lineno, node.end_lineno + 1))
-        runtime_lines = runtime_body_lines(old_tree, new_tree, set(info.get("global", [])), lines)
-        if runtime_lines is not None and not info.get("global_read"):
-            expanded.intersection_update(runtime_lines)
         selected = set(readers)
         for line in expanded:
             selected.update(self.numbers(info.get("lines", {}).get(str(line), [])))
